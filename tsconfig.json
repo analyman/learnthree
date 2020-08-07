@@ -2,7 +2,7 @@
     "version": "3.8.3",
     "compilerOptions": {
         "downlevelIteration": true,
-        "lib": ["es2015"],
+        "lib": ["es2015", "dom"],
         "target": "es2019",
         "module": "commonjs",
         "typeRoots": [
@@ -23,9 +23,9 @@
         "sourceMap": true
     },
     "include": [
-        "lib/**/*",
-        "bin/**/*",
-        "test/**/*"
+        "lib/**/*.ts",
+        "bin/**/*.ts",
+        "test/**/*.ts"
     ],
     "exclude": [
         "node_modules"

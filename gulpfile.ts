@@ -1,151 +1,113 @@
-import * as gulp   from 'gulp';
-import * as srcmap from 'gulp-sourcemaps';
-import * as ts     from 'gulp-typescript';
-import * as merge  from 'merge2';
+import * as gulp       from 'gulp';
+import * as sass       from 'gulp-sass';
+sass.compiler = require('dart-sass');
+import * as sourcemaps from 'gulp-sourcemaps';
+import * as merge      from 'merge2';
+import * as rimraf     from 'rimraf';
+import * as typescript from 'gulp-typescript';
+import * as vinyl_buffer from 'vinyl-buffer';
+import * as vinyl_source_stream from 'vinyl-source-stream';
 
-import * as fs         from 'fs';
-import * as util       from 'util';
-import * as path       from 'path';
-import * as proc       from 'process';
-import * as child_proc from 'child_process';
+import * as browserify from 'browserify';
+import * as tsify      from 'tsify';
 
-import * as rimraf from 'rimraf';
+import * as path from 'path';
+import * as util from 'util';
+import * as proc from 'process';
 
 import * as annautils from 'annautils';
 
-import * as web from './gulp-web';
-web.doit();
 
-const release_root = "./release";
-const test_root    = "./testme";
-const project_name = "project_name";
+const project_name = "learnthree";
+
+const project_root = "./";
+const doc_root     = "./docroot";
+const tsconfig     = "./tsconfig.json";
 
 function onerror(err) {
     console.log(err.toString());
     this.emit("end");
 }
 
-/** package.json, README.md */
-function copy_misc() //{
-{
-    return merge([
-        gulp.src("./package.json").pipe(gulp.dest(path.join(release_root, project_name))),
-        gulp.src("./README.md").pipe(gulp.dest(path.join(release_root, project_name))),
-        gulp.src("./package.json").pipe(gulp.dest(path.join(release_root, "@types", project_name))),
-        gulp.src("./README.md").pipe(gulp.dest(path.join(release_root, "@types", project_name)))
-    ]);
-} //}
-
-/** compile typescript with specified glob */
-function compile_ts_dir(glob: string, destination: string, declaration: boolean = false, decl_dest: string = null) //{
-{
+// browser javascript - compile_ts() //{
+function browser_compile_ts_dir(entry: string, destination: string, sourceMaps: boolean = false) {
     return function() {
-        let ts_project = ts.createProject("./tsconfig.json", {
-            declaration: declaration
-        });
+        let sm = browserify({debug: true})
+        .add(entry)
+        .plugin("tsify", {target: 'es6', project: tsconfig}).on("error", onerror)
+        .bundle().on("error", onerror)
+        .pipe(vinyl_source_stream(path.basename(entry.replace(".ts", ".js"))));
 
-        let ts_pipe = gulp.src(glob)
-            .pipe(ts_project()).on("error", onerror);
-        if (declaration) {
-            if (decl_dest == null) throw new Error("fix here");
-            return merge([
-                ts_pipe.js .pipe(gulp.dest(destination)),
-                ts_pipe.dts.pipe(gulp.dest(decl_dest))
-            ]);
-        } else {
-            return ts_pipe.js.pipe(gulp.dest(destination));
-        }
+        if (sourceMaps)
+            return sm.pipe(vinyl_buffer())
+                .pipe(sourcemaps.init({loadMaps: true}))
+                .pipe(sourcemaps.write())
+                .pipe(gulp.dest(destination));
+        else
+            return sm.pipe(gulp.dest(destination));
     }
-} //}
+}
 
-/** compile lib */
-let compile_lib_ts = compile_ts_dir //{
-(
-    "lib/**/*.ts", 
-    path.join(release_root, project_name, "lib"),
-    true, 
-    path.join(release_root, "@types", project_name, "lib")
-); //}
-
-/** compile bin */
-let compile_bin_ts = compile_ts_dir //{
-(
-    "bin/*.ts", 
-    path.join(release_root, project_name, "bin")
-); //}
-
-/** chmod 777 to all of excutable file */
-function chmod_bin_js() //{
-{
-    return annautils.fs.promisify.chmodRecursive(path.join(release_root, project_name, "bin"), "777", 1, /.*/).then((num) => {
-        console.log(`change ${num} files to permission '777'`);
-    }, (err) => {
-        console.log(err);
-    });
-} //}
-
-/** compile index.ts */
-let compile_index_ts = compile_ts_dir //{
-(
-    "./index.ts", 
-    path.join(release_root, project_name),
-    true, 
-    path.join(release_root, "@types", project_name)
-); //}
-
-/** make a symbol link of current project to node_modules */
-function link_to_node_modules() //{
-{
-    return merge([
-        gulp.src(path.join(release_root, project_name, "*")).pipe(gulp.symlink(path.join("node_modules", project_name))),
-        gulp.src(path.join(release_root, "@types", project_name, "*")).
-        pipe(gulp.symlink(path.join("node_modules", "@types", project_name)))
-    ]);
-} //}
-
-let ts_task = gulp.series(compile_index_ts, compile_lib_ts, compile_bin_ts, chmod_bin_js, link_to_node_modules);
-
-/** test */
-let compile_test = compile_ts_dir("./test/**/*.ts", test_root); //{
-function link_test_html() //{
-{
-    return gulp.src("test/*.html")
-    .pipe(gulp.symlink(test_root));
-} //}
-function link_test_json() //{
-{
-    return gulp.src("test/*.json")
-    .pipe(gulp.symlink(test_root));
-} //}
-function build_test() //{
-{
-    return merge([
-        compile_test(),
-        link_test_html(),
-        link_test_json()
-    ]);
-} //}
+let js_entry = browser_compile_ts_dir(path.join(project_root, "/bin/main.ts"), doc_root, true);
 //}
-/** watch */
-function watch_S() //{
+
+// styles - sass and css - sytles__() //{
+function sass_compile_move() {
+    return gulp.src(path.join(project_root, "styles/*.scss"))
+    .pipe(sass().on("error", onerror))
+    .pipe(gulp.dest(path.join(doc_root, "styles/")));
+}
+function css_copy() {
+    return gulp.src(path.join(project_root, "styles/*.css"))
+    .pipe(gulp.dest(path.join(doc_root, "styles/")));
+}
+function styles__() {
+    return merge([
+        sass_compile_move(),
+        css_copy()
+    ]);
+}
+//}
+
+// asset asset_copy() //{
+function asset_copy() {
+    return gulp.src(path.join(project_root, "asset/*"))
+    .pipe(gulp.dest(path.join(doc_root, "asset/")));
+}
+//}
+
+// html - htmls_copy() //{
+function htmls_copy() {
+    return gulp.src(path.join(project_root, "html/**/*.html"))
+    .pipe(gulp.dest(doc_root));
+}
+//}
+
+export function watch() //{
 {
-    let watcher = gulp.watch(["lib/**/*.ts", "test/**/*.ts", "./*.ts", "bin/*.ts"]);
+    let watcher = gulp.watch([
+        "lib/**/*.ts", "bin/**/*.ts", "styles/*.scss", 
+        "html/*.html", "asset/**", "index*"
+    ].map(x => path.join(project_root, x)));
     let handle = (fp: string, stat) => {
-        console.log(`----- file [${fp}]`);
+        console.log(`[${fp}] fires event`);
         let fp_split = fp.split("/");
         switch (fp_split[0]) {
             case "lib":
-                console.log("build lib");
-                return compile_lib_ts(); // index.ts should be compile first, but ...
             case "bin":
-                console.log("build bin");
-                return compile_bin_ts(); // index.ts should be compile first, but ...
-            case "test":
-                console.log("build test");
-                return build_test();
-            case "index.ts":
-                console.log("build index.ts");
-                return compile_index_ts();
+                console.log("browser javascript");
+                return js_entry();
+            case "styles":
+                console.log("styles");
+                return styles__();
+            case "html":
+                console.log("htmls");
+                return htmls_copy();
+            case "asset":
+                console.log("asset");
+                return asset_copy();
+            default:
+                console.log("unknown");
         }
     }
     watcher.on("change", handle);
@@ -154,58 +116,29 @@ function watch_S() //{
     watcher.on("error", onerror);
 } //}
 
-/** project specify */
-function project_specify() //{
-{
-    return merge([
-        gulp.src("docroot/**").pipe(gulp.dest(path.join(release_root, project_name, "docroot"))),
-        gulp.src("etc/**")    .pipe(gulp.dest(path.join(release_root, project_name, "etc"))),
-    ]);
-} //}
+export function doit() {
+gulp.task("browserjs", js_entry);
+gulp.task("app", gulp.parallel(js_entry, styles__, asset_copy, htmls_copy));
+gulp.task("watch", () => watch());
 
-/** TASK typescript */
-gulp.task("typescript", ts_task);
+gulp.task("default", gulp.series("app"));
 
-/** TASK release */
-gulp.task("release", gulp.parallel("typescript", copy_misc, project_specify));
-
-/** TASK buildtest */
-gulp.task("buildtest", build_test);
-
-/** TASK default */
-gulp.task("default", gulp.series("typescript", build_test));
-
-/** TASK watch */
-gulp.task("watch", () => {
-    watch_S();
-    web.watch_B();
-});
-
-/** TASK test */
-gulp.task("test", () => {
-    let test_task = proc.env["test"];
-    if (test_task == null) return Promise.resolve("empty");
-    let test_ret;
-    try {
-        test_ret = child_proc.execSync(`cd testme && node ${test_task}_test.js`);
-    } catch {}
-    console.log((test_ret || "").toString());
-    return Promise.resolve("yes");
-});
-
-/** TASK clean */
+// clean //{
 gulp.task("clean", () => {
     let dirs = [
-        test_root, 
-        release_root, 
-        "./dist", 
-        path.join("node_modules", project_name),
-        path.join("node_modules", "@types", project_name)
+        doc_root
     ];
     for (let vv of dirs) {
         try {
             rimraf.sync(vv);
-        } catch {}
+        } catch (e) {
+            console.error(e);
+        }
     }
     return Promise.resolve(true);
 });
+//}
+}
+
+doit();
+
